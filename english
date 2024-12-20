@@ -1,0 +1,88 @@
+import telebot
+import yfinance as yf
+import threading
+import sys
+
+# Telegram bot configuration
+TELEGRAM_TOKEN = "INSERT_YOUR_TELEGRAM_API_KEY"
+
+# Create the Telegram bot
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
+
+# Function to fetch market data using yfinance
+def get_market_data(symbol):
+    try:
+        ticker = yf.Ticker(symbol)
+        data = ticker.history(period="1y")  # Fetch 1 year of data
+        prices = data["Close"].dropna().tolist()
+        if len(prices) == 0:
+            raise ValueError("No data available for the given symbol.")
+        return prices
+    except Exception as e:
+        raise ValueError(f"Error fetching market data: {e}")
+
+# Function to calculate the moving average (using available data)
+def calculate_moving_average(prices, days=200):
+    available_days = len(prices)
+    if available_days < days:
+        print(f"Only {available_days} days of data available. Using available data.")
+        days = available_days
+    return sum(prices[-days:]) / days
+
+# Function to calculate the Mayer Multiple
+def calculate_mayer_multiple(current_price, moving_average):
+    return current_price / moving_average
+
+# Command for analyzing the Mayer Multiple
+@bot.message_handler(commands=['mayer'])
+def send_mayer_multiple(message):
+    try:
+        bot.reply_to(message, "Enter the ticker symbol for the asset (e.g., AAPL, TSLA):")
+
+        @bot.message_handler(func=lambda msg: True)
+        def handle_symbol(msg):
+            symbol = msg.text.upper()
+
+            # Fetch market data
+            prices = get_market_data(symbol)
+            current_price = prices[-1]
+            moving_average = calculate_moving_average(prices)
+
+            # Calculate Mayer Multiple
+            mayer_multiple = calculate_mayer_multiple(current_price, moving_average)
+
+            # Respond to the user
+            response = (
+                f"\U0001F4C8 Data for {symbol}:\n"
+                f"- Current price: ${current_price:.2f}\n"
+                f"- Moving Average (last {min(len(prices), 200)} days): ${moving_average:.2f}\n"
+                f"- Mayer Multiple: {mayer_multiple:.2f}\n\n"
+            )
+
+            # Classify the asset based on Mayer Multiple
+            if mayer_multiple > 2.4:
+                response += "\U0001F534 The asset is overvalued. Exercise caution!"
+            elif mayer_multiple < 0.8:
+                response += "\U0001F7E2 The asset is undervalued. This may be an opportunity!"
+            else:
+                response += "\U000026AA The asset is within the normal range."
+
+            bot.reply_to(msg, response)
+
+    except Exception as e:
+        bot.reply_to(message, f"Error: {str(e)}")
+
+# Command to stop the bot
+@bot.message_handler(commands=['stop'])
+def stop_bot(message):
+    bot.reply_to(message, "Stopping the bot...")
+    threading.Thread(target=sys.exit).start()
+
+# Start the bot
+if __name__ == "__main__":
+    print("Bot is running...")
+    while True:
+        try:
+            bot.polling()
+        except Exception as e:
+            print(f"Error: {e}")
